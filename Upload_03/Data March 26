@@ -1,0 +1,136 @@
+import neurol
+from neurol import streams
+from pylsl import StreamInlet, resolve_stream
+import numpy as np
+from pylsl import StreamInlet, resolve_stream
+from scipy.signal import butter, filtfilt
+
+import csv
+import time
+import numpy as np
+from pytrigno import TrignoEMG
+import matplotlib.pyplot as plt
+
+
+def butter_highpass(cutoff, fs, order=5):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype="high", analog=False)
+    return b, a
+
+
+def highpass_filter(data, cutoff, fs, order=5):
+    b, a = butter_highpass(cutoff, fs, order=order)
+    y = filtfilt(b, a, data)
+    return y
+
+def getEMGValues():
+    # Configure TrignoEMG instance
+    emg_device = TrignoEMG(
+        channel_range=(1, 8),
+        samples_per_read=100,
+        units='mV',
+        host='localhost',
+        cmd_port=50040,
+        data_port=50041,
+        timeout=10
+    )
+
+    # Start streaming EMG data
+    emg_device.start()
+    timestamplist = []
+    channels = []
+    data_7_list = []
+
+    for i in range (1000):
+        emg_data = emg_device.read()
+
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        timestamplist.append(timestamp)
+
+        channel_data_4 = emg_data[2] # Get channel data 4
+        channel_data_7 = emg_data[5] # Get channel data 7
+
+        channel_average_4 = np.mean(channel_data_4)
+        channel_average_7 = np.mean(channel_data_7)
+
+        # Currently only will return for channel 4 and channel 7 as an array, will later add a way to get all channels into an array, ignoring dead channels
+        channels.append(channel_average_4)
+        channels.append(channel_average_7)
+        
+        data_7_list.append(channel_average_7)
+        #print(channels)
+
+        
+        #print("--------------------------------------------------------------------------------------------------------------")
+        #print(channel_data_7)
+        #print("**************************************************************************************************************")
+
+    x = timestamplist
+    y = data_7_list
+
+    plt.figure(figsize=(8,6))
+    plt.plot(x, y, label="Channel 7 Data", color='blue', linewidth=2)
+    plt.title("Channel Data")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    return channels
+
+def getEEGValues():
+    streams1 = resolve_stream("name='Unicorn'")
+    inlet = StreamInlet(streams1[0])
+    stream = streams.lsl_stream(inlet, buffer_length=1024)
+
+    if not stream:
+        print("There is no values being read through the EEG Stream!")
+        return -1
+
+    # Data is returned in the format:
+    # [EEG1, EEG2, ..., EEG8, Accel X, Accel Y, Accel Z, Gyro X, Gyro Y, Battery %, Counter, Indicator (On/Off, always 1)
+    data = []
+    for _ in range(20):
+        sample, timestamp = inlet.pull_sample()
+        ext_sample = sample[0]
+        # print(timestamp, sample)
+        data.append(sample)
+
+    # Transpose the data matrix
+    data_transposed = list(zip(*data))
+
+    # Filter each row separately
+    filtered_data = [highpass_filter(row, cutoff=60, fs=250) for row in data_transposed]
+
+    # Calculate the average for each row
+    averages = [sum(row) / len(row) for row in filtered_data]
+
+    return averages
+
+
+
+def EEGThreshold(threshold):
+    EEG_val = getEEGValues()
+    print(EEG_val)
+
+    if (EEG_val == -1):
+        print("Error with getting the EEG values!")
+        return -1
+
+    if (EEG_val[0] > threshold):
+        print("Greater than the threshold!")
+        return 1
+    else:
+        print("Less than the threshold!")
+        return 0
+
+
+# change
+
+
+print("In main")
+while (1):
+    #EEGThreshold(0.1)
+    emg = getEMGValues()
+    print(emg)
